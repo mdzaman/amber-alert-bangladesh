@@ -1,0 +1,41 @@
+sequenceDiagram
+    participant User as User/Agency
+    participant API as API Gateway
+    participant Auth as Auth Service
+    participant Alert as Alert Service
+    participant ML as ML Services
+    participant Queue as Message Queue
+    participant Notify as Notification Service
+    participant DB as Databases
+    participant Ext as External Systems
+
+    User->>API: Submit Alert Request
+    API->>Auth: Validate Credentials
+    Auth-->>API: Authentication Token
+    
+    API->>Alert: Create Alert
+    Alert->>DB: Store Alert Data
+    
+    par Process Alert
+        Alert->>ML: Process Images/Location
+        ML-->>Alert: Analysis Results
+        Alert->>Queue: Trigger Notifications
+        Queue->>Notify: Send Alert Messages
+    end
+    
+    par External Processing
+        Alert->>Ext: Notify Emergency Services
+        Alert->>Ext: Update Police Database
+        Alert->>Ext: Broadcast to Media
+    end
+    
+    Notify-->>User: Confirmation
+    Ext-->>Alert: Acknowledgments
+    
+    loop Monitor Updates
+        Ext->>Alert: Status Updates
+        Alert->>DB: Update Records
+        Alert->>Queue: Trigger Update Notifications
+        Queue->>Notify: Send Status Updates
+        Notify-->>User: Status Notification
+    end
