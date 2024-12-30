@@ -1,0 +1,296 @@
+-- Create SLA monitoring schema
+CREATE SCHEMA IF NOT EXISTS sla_monitoring;
+SET search_path TO sla_monitoring, public;
+
+-- Enable TimescaleDB for time-series data
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+
+-- SLA Definitions
+CREATE TABLE sla_definitions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name VARCHAR(100) NOT NULL,
+    description TEXT,
+    service_type VARCHAR(50) NOT NULL,
+    metric_name VARCHAR(50) NOT NULL,
+    threshold_value DECIMAL(10,2) NOT NULL,
+    threshold_unit VARCHAR(20) NOT NULL,
+    evaluation_period VARCHAR(20) NOT NULL,
+    priority VARCHAR(20) CHECK (priority IN ('critical', 'high', 'medium', 'low')),
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Infrastructure Metrics
+CREATE TABLE infrastructure_metrics (
+    timestamp TIMESTAMPTZ NOT NULL,
+    server_id VARCHAR(50) NOT NULL,
+    cpu_usage_percent DECIMAL(5,2),
+    memory_usage_percent DECIMAL(5,2),
+    disk_usage_percent DECIMAL(5,2),
+    network_latency_ms INTEGER,
+    request_count INTEGER,
+    error_count INTEGER,
+    status VARCHAR(20)
+);
+
+SELECT create_hypertable('infrastructure_metrics', 'timestamp');
+
+-- Database Performance
+CREATE TABLE database_metrics (
+    timestamp TIMESTAMPTZ NOT NULL,
+    database_instance VARCHAR(50) NOT NULL,
+    query_latency_ms INTEGER,
+    active_connections INTEGER,
+    idle_connections INTEGER,
+    deadlocks INTEGER,
+    buffer_hit_ratio DECIMAL(5,2),
+    disk_usage_percent DECIMAL(5,2),
+    replication_lag_ms INTEGER,
+    query_count INTEGER,
+    long_running_queries INTEGER
+);
+
+SELECT create_hypertable('database_metrics', 'timestamp');
+
+-- Application Performance
+CREATE TABLE application_metrics (
+    timestamp TIMESTAMPTZ NOT NULL,
+    service_name VARCHAR(50) NOT NULL,
+    endpoint VARCHAR(200),
+    response_time_ms INTEGER,
+    error_count INTEGER,
+    success_count INTEGER,
+    concurrent_users INTEGER,
+    memory_usage_mb INTEGER,
+    cpu_usage_percent DECIMAL(5,2),
+    status_code INTEGER
+);
+
+SELECT create_hypertable('application_metrics', 'timestamp');
+
+-- API Usage Metrics
+CREATE TABLE api_metrics (
+    timestamp TIMESTAMPTZ NOT NULL,
+    endpoint VARCHAR(200) NOT NULL,
+    method VARCHAR(10) NOT NULL,
+    response_time_ms INTEGER,
+    status_code INTEGER,
+    user_id UUID,
+    ip_address INET,
+    request_size_bytes INTEGER,
+    response_size_bytes INTEGER,
+    rate_limit_remaining INTEGER
+);
+
+SELECT create_hypertable('api_metrics', 'timestamp');
+
+-- User Session Metrics
+CREATE TABLE user_session_metrics (
+    timestamp TIMESTAMPTZ NOT NULL,
+    user_id UUID NOT NULL,
+    session_id UUID NOT NULL,
+    session_duration_seconds INTEGER,
+    page_views INTEGER,
+    api_calls INTEGER,
+    errors_encountered INTEGER,
+    browser_info TEXT,
+    device_type VARCHAR(50),
+    location_info JSONB
+);
+
+SELECT create_hypertable('user_session_metrics', 'timestamp');
+
+-- SLA Violations
+CREATE TABLE sla_violations (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    sla_definition_id UUID REFERENCES sla_definitions(id),
+    timestamp TIMESTAMPTZ NOT NULL,
+    metric_value DECIMAL(10,2),
+    threshold_value DECIMAL(10,2),
+    violation_duration_minutes INTEGER,
+    service_affected VARCHAR(100),
+    severity VARCHAR(20),
+    resolved_at TIMESTAMPTZ,
+    resolution_notes TEXT,
+    notification_sent BOOLEAN DEFAULT false
+);
+
+-- Performance Alerts
+CREATE TABLE performance_alerts (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    alert_type VARCHAR(50) NOT NULL,
+    service_type VARCHAR(50) NOT NULL,
+    severity VARCHAR(20) NOT NULL,
+    message TEXT NOT NULL,
+    timestamp TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    resolved_at TIMESTAMPTZ,
+    metric_value DECIMAL(10,2),
+    threshold_value DECIMAL(10,2),
+    affected_components TEXT[]
+);
+
+-- Resource Usage Summary
+CREATE TABLE resource_usage_summary (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    service_name VARCHAR(100) NOT NULL,
+    timestamp TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    time_period VARCHAR(20) NOT NULL,
+    avg_cpu_usage DECIMAL(5,2),
+    max_cpu_usage DECIMAL(5,2),
+    avg_memory_usage DECIMAL(5,2),
+    max_memory_usage DECIMAL(5,2),
+    total_requests INTEGER,
+    error_rate DECIMAL(5,2),
+    avg_response_time DECIMAL(10,2)
+);
+
+-- Views for Monitoring and Reporting
+
+-- Current System Health
+CREATE OR REPLACE VIEW current_system_health AS
+SELECT 
+    service_name,
+    AVG(response_time_ms) as avg_response_time,
+    COUNT(*) as request_count,
+    COUNT(*) FILTER (WHERE status_code >= 400) as error_count,
+    AVG(cpu_usage_percent) as avg_cpu_usage,
+    MAX(concurrent_users) as peak_users
+FROM application_metrics
+WHERE timestamp >= NOW() - INTERVAL '5 minutes'
+GROUP BY service_name;
+
+-- SLA Compliance Report
+CREATE OR REPLACE VIEW sla_compliance_report AS
+WITH sla_metrics AS (
+    SELECT 
+        sd.name as sla_name,
+        sd.threshold_value,
+        COUNT(sv.id) as violation_count,
+        AVG(sv.metric_value) as avg_metric_value,
+        MAX(sv.metric_value) as max_metric_value
+    FROM sla_definitions sd
+    LEFT JOIN sla_violations sv ON sd.id = sv.sla_definition_id
+    WHERE sv.timestamp >= NOW() - INTERVAL '24 hours'
+    GROUP BY sd.id, sd.name, sd.threshold_value
+)
+SELECT 
+    sla_name,
+    threshold_value,
+    violation_count,
+    avg_metric_value,
+    max_metric_value,
+    CASE 
+        WHEN violation_count = 0 THEN 100
+        ELSE (100 - (violation_count * 5))
+    END as compliance_percentage
+FROM sla_metrics;
+
+-- Top API Usage
+CREATE OR REPLACE VIEW top_api_usage AS
+SELECT 
+    endpoint,
+    method,
+    COUNT(*) as total_calls,
+    AVG(response_time_ms) as avg_response_time,
+    COUNT(*) FILTER (WHERE status_code >= 400) as error_count,
+    COUNT(DISTINCT user_id) as unique_users
+FROM api_metrics
+WHERE timestamp >= NOW() - INTERVAL '24 hours'
+GROUP BY endpoint, method
+ORDER BY total_calls DESC;
+
+-- Database Performance Overview
+CREATE OR REPLACE VIEW database_performance AS
+SELECT 
+    database_instance,
+    AVG(query_latency_ms) as avg_query_latency,
+    MAX(query_latency_ms) as max_query_latency,
+    AVG(active_connections) as avg_connections,
+    MAX(active_connections) as peak_connections,
+    AVG(buffer_hit_ratio) as cache_hit_ratio,
+    SUM(deadlocks) as total_deadlocks
+FROM database_metrics
+WHERE timestamp >= NOW() - INTERVAL '1 hour'
+GROUP BY database_instance;
+
+-- Functions for SLA Monitoring
+
+-- Check SLA Compliance
+CREATE OR REPLACE FUNCTION check_sla_compliance(
+    p_service_type VARCHAR,
+    p_metric_name VARCHAR,
+    p_metric_value DECIMAL
+) RETURNS BOOLEAN AS $$
+DECLARE
+    v_threshold DECIMAL;
+    v_compliant BOOLEAN;
+BEGIN
+    -- Get threshold from SLA definitions
+    SELECT threshold_value INTO v_threshold
+    FROM sla_definitions
+    WHERE service_type = p_service_type
+    AND metric_name = p_metric_name
+    LIMIT 1;
+
+    -- Check compliance
+    IF p_metric_value <= v_threshold THEN
+        v_compliant := true;
+    ELSE
+        v_compliant := false;
+        
+        -- Log violation
+        INSERT INTO sla_violations (
+            sla_definition_id,
+            timestamp,
+            metric_value,
+            threshold_value,
+            service_affected,
+            severity
+        )
+        SELECT 
+            id,
+            NOW(),
+            p_metric_value,
+            threshold_value,
+            service_type,
+            priority
+        FROM sla_definitions
+        WHERE service_type = p_service_type
+        AND metric_name = p_metric_name;
+    END IF;
+
+    RETURN v_compliant;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Generate SLA Report
+CREATE OR REPLACE FUNCTION generate_sla_report(
+    p_start_time TIMESTAMPTZ,
+    p_end_time TIMESTAMPTZ
+) RETURNS TABLE (
+    service_type VARCHAR,
+    metric_name VARCHAR,
+    compliance_rate DECIMAL,
+    violation_count INTEGER,
+    avg_metric_value DECIMAL,
+    peak_metric_value DECIMAL
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        sd.service_type,
+        sd.metric_name,
+        COALESCE(
+            (1 - (COUNT(sv.id)::DECIMAL / 
+            EXTRACT(EPOCH FROM (p_end_time - p_start_time)) * 3600)) * 100,
+            100
+        ) as compliance_rate,
+        COUNT(sv.id) as violation_count,
+        AVG(sv.metric_value) as avg_metric_value,
+        MAX(sv.metric_value) as peak_metric_value
+    FROM sla_definitions sd
+    LEFT JOIN sla_violations sv ON sd.id = sv.sla_definition_id
+    AND sv.timestamp BETWEEN p_start_time AND p_end_time
+    GROUP BY sd.service_type, sd.metric_name;
+END;
+$$ LANGUAGE plpgsql;
