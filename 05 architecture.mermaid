@@ -1,0 +1,103 @@
+graph TB
+    subgraph Users["User Interfaces"]
+        mob["Mobile Apps"]
+        web["Web Portal"]
+        api["Public API"]
+    end
+
+    subgraph AWS Cloud
+        subgraph Security["Security Layer"]
+            waf["AWS WAF"]
+            shield["AWS Shield"]
+            cognito["Amazon Cognito"]
+        end
+
+        subgraph Frontend["Frontend Services"]
+            alb["Application Load Balancer"]
+            cdn["CloudFront CDN"]
+        end
+
+        subgraph Core["Core Services"]
+            alert["Alert Management<br/>Service"]
+            notif["Notification<br/>Gateway"]
+            audit["Audit Service"]
+            trans["Translation<br/>Service"]
+        end
+
+        subgraph AI["AI Services"]
+            face["Facial Recognition"]
+            geo["Geofencing"]
+            ml["ML Pipeline"]
+            pred["Predictive Analytics"]
+        end
+
+        subgraph Integration["Integration Services"]
+            nid["National ID<br/>Integration"]
+            iot["IoT Gateway"]
+            emer["Emergency Services<br/>Connector"]
+        end
+
+        subgraph Storage["Data Storage"]
+            rds["Amazon RDS"]
+            s3["Amazon S3"]
+            dynamo["DynamoDB"]
+            elastic["ElasticSearch"]
+        end
+
+        subgraph Queue["Message Queue"]
+            sqs["Amazon SQS"]
+            sns["Amazon SNS"]
+        end
+    end
+
+    subgraph External["External Systems"]
+        police["Police Database"]
+        emergency["Emergency Services"]
+        telecom["Telecom Operators"]
+        social["Social Media"]
+    end
+
+    %% User Interface Connections
+    mob & web & api --> waf
+    waf --> alb
+    alb --> cdn
+
+    %% Security Layer
+    waf --> shield
+    shield --> cognito
+    cognito --> Core
+
+    %% Core Service Connections
+    alert --> notif
+    alert --> audit
+    alert --> trans
+    
+    %% AI Service Connections
+    alert --> face
+    alert --> geo
+    alert --> ml
+    ml --> pred
+
+    %% Storage Connections
+    Core --> rds & s3 & dynamo & elastic
+    AI --> s3
+    AI --> dynamo
+
+    %% Queue Connections
+    Core --> sqs
+    sqs --> sns
+    sns --> notif
+
+    %% External Integrations
+    Integration --> police
+    Integration --> emergency
+    Integration --> telecom
+    Integration --> social
+
+    classDef aws fill:#FF9900,stroke:#232F3E,stroke-width:2px;
+    classDef external fill:#87CEEB,stroke:#4A4A4A,stroke-width:2px;
+    classDef users fill:#98FB98,stroke:#4A4A4A,stroke-width:2px;
+
+    class Core,AI,Integration,Storage,Queue,Security,Frontend aws;
+    class External external;
+    class Users users;
