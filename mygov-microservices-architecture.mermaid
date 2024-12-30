@@ -1,0 +1,30 @@
+graph TB
+    Client["Frontend Client"]
+    Gateway["API Gateway"]
+    Auth["Auth Service"]
+    
+    subgraph "Core Services"
+        Personal["Personal Service"]
+        Education["Education Service"]
+        Agriculture["Agriculture Service"]
+        Finance["Finance Service"]
+        Land["Land Service"]
+    end
+    
+    subgraph "Shared Infrastructure"
+        ServiceMesh["Service Mesh"]
+        ConfigServer["Config Server"]
+        ServiceRegistry["Service Registry"]
+    end
+    
+    Client -->|"HTTPS"| Gateway
+    Gateway -->|"gRPC/REST"| Auth
+    Gateway -->|"gRPC/REST"| ServiceMesh
+    ServiceMesh --> Personal
+    ServiceMesh --> Education
+    ServiceMesh --> Agriculture
+    ServiceMesh --> Finance
+    ServiceMesh --> Land
+    
+    ServiceRegistry -.->|"Register/Discover"| ServiceMesh
+    ConfigServer -.->|"Configuration"| ServiceMesh
